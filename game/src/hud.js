@@ -1,199 +1,245 @@
-// HUD — glass instruments drawn over the 3D view: airspeed and altitude
-// tapes, compass strip, throttle / fuel / hull bars, objective tracker,
-// timer, warnings. All canvas, all readable at a glance.
-// v3 legibility pass: numbers 26→34px bold, panels darker (0.62), bars
-// thicker, compass wider with bigger heading readout. Layout zones are
-// kept apart on purpose — top bar, side tapes, bottom bars + compass never
-// overlap at 1280x800 (v2 had two overlaps on its first visual pass).
-export class Hud {
-  constructor(canvas) {
-    this.cv = canvas;
-    this.ctx = canvas.getContext('2d');
-  }
+// EMBERWING v3 — the heads-up display.
+// Big, high-contrast, dark-panelled: altitude and speed tapes on the
+// flanks, a wide compass strip up top, fuel and hull bars down low, and
+// warnings that shout before the jet does. In cockpit view the panel
+// carries the numbers, so the HUD thins down to objectives + warnings.
+import { WORLD } from './config.js';
 
-  panel(ctx, x, y, w, h, alpha = 0.62) {
-    ctx.fillStyle = `rgba(8, 12, 22, ${alpha})`;
-    ctx.strokeStyle = 'rgba(140, 180, 230, 0.45)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, 8);
-    ctx.fill();
-    ctx.stroke();
-  }
+const PANEL = 'rgba(8,10,18,0.62)';
+const PANEL_EDGE = 'rgba(255,255,255,0.16)';
+const INK = '#f2f4f8';
+const DIM = '#aab2c0';
+const AMBER = '#ffb52e';
+const GREEN = '#39d353';
+const RED = '#ff5a5a';
 
-  // cockpit=true: only the top bar, reticle and warnings — the dashboard
-  // panel already carries speed, altitude, heading, throttle, fuel, hull.
-  draw(s, input, t, W, H, cockpit = false) {
-    const ctx = this.ctx;
-    const knots = Math.round(s.speed * 1.94);
-    const altFt = Math.round(s.y * 3.28084);
-    const heading = Math.round(((s.x / 840) * 180 + 360) % 360);
-    const speed01 = s.speed / 320;
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-
-    // --- top bar: mission + objective + timer ---
-    this.panel(ctx, 14, 12, W - 28, 50, 0.58);
-    ctx.fillStyle = '#ffd76a';
-    ctx.font = 'bold 17px system-ui, sans-serif';
-    ctx.fillText(`${s.mission.num}. ${s.mission.name.toUpperCase()}`, 26, 33);
-    ctx.fillStyle = '#dfe8ff';
-    ctx.font = 'bold 14px system-ui, sans-serif';
-    const obj = s.mission.landing && s.nextRing >= s.course.rings.length
-      ? 'LAND ON THE RUNWAY'
-      : s.mission.drops
-        ? `RINGS ${s.ringsHit}/${s.course.rings.length} · DROPS ${s.dropsDone}/${s.mission.drops}`
-        : s.mission.beacons
-          ? `RINGS ${s.ringsHit}/${s.course.rings.length} · BEACONS ${s.beaconsLit}/${s.mission.beacons}`
-          : `RINGS ${s.ringsHit}/${s.course.rings.length}`;
-    ctx.fillText(obj, 26, 53);
-    // timer
-    const mm = Math.floor(s.time / 60);
-    const ss = Math.floor(s.time % 60).toString().padStart(2, '0');
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px system-ui, monospace';
-    ctx.fillText(`${mm}:${ss}`, W - 26, 38);
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.fillStyle = '#9fb4d8';
-    const par = s.mission.parGold ? `GOLD ${Math.floor(s.mission.parGold / 60)}:${(s.mission.parGold % 60).toString().padStart(2, '0')}` : 'FREE FLIGHT';
-    ctx.fillText(par, W - 26, 54);
-    ctx.textAlign = 'left';
-
-    if (cockpit) {
-      // dashboard owns the rest; keep only the reticle + warnings below
-      this.drawReticleWarnings(ctx, s, t, W, H);
-      return;
-    }
-
-    // --- left: airspeed tape ---
-    this.panel(ctx, 14, H - 168, 104, 150, 0.62);
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.fillText('AIRSPEED', 26, H - 148);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 34px system-ui, monospace';
-    ctx.fillText(String(knots), 26, H - 110);
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.fillText('knots', 26, H - 92);
-    // speed bar
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(26, H - 76, 80, 10);
-    ctx.fillStyle = speed01 > 0.85 ? '#ff7a3c' : '#7fd0ff';
-    ctx.fillRect(26, H - 76, 80 * Math.min(1, speed01), 10);
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 11px system-ui, sans-serif';
-    ctx.fillText(`${Math.round(s.speed)} m/s`, 26, H - 54);
-
-    // --- right: altitude tape ---
-    this.panel(ctx, W - 118, H - 168, 104, 150, 0.62);
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.fillText('ALTITUDE', W - 106, H - 148);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 34px system-ui, monospace';
-    ctx.fillText(String(altFt), W - 106, H - 110);
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 12px system-ui, sans-serif';
-    ctx.fillText('feet', W - 106, H - 92);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(W - 106, H - 76, 80, 10);
-    ctx.fillStyle = s.y < 40 ? '#ff5a4e' : '#7fd0ff';
-    ctx.fillRect(W - 106, H - 76, 80 * (s.y / 520), 10);
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 11px system-ui, sans-serif';
-    ctx.fillText(`${Math.round(s.y)} m`, W - 106, H - 54);
-
-    // --- bottom center: compass strip ---
-    const cw = 380;
-    const cx0 = (W - cw) / 2;
-    this.panel(ctx, cx0, H - 52, cw, 36, 0.58);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(cx0, H - 52, cw, 36);
-    ctx.clip();
-    ctx.fillStyle = '#9fb4d8';
-    ctx.font = 'bold 12px system-ui, monospace';
-    ctx.textAlign = 'center';
-    for (let d = -180; d <= 540; d += 15) {
-      const rel = ((d - heading + 540) % 360) - 180;
-      const x = cx0 + cw / 2 + (rel / 90) * (cw / 2);
-      if (x < cx0 || x > cx0 + cw) continue;
-      const label = d % 90 === 0
-        ? ['N', 'E', 'S', 'W'][(((d % 360) + 360) % 360) / 90]
-        : String((((d % 360) + 360) % 360)).padStart(3, '0');
-      ctx.fillText(label, x, H - 30);
-      ctx.fillRect(x, H - 24, 1, d % 45 === 0 ? 9 : 5);
-    }
-    ctx.restore();
-    ctx.fillStyle = '#ffd76a';
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - 7, H - 52);
-    ctx.lineTo(W / 2 + 7, H - 52);
-    ctx.lineTo(W / 2, H - 41);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 15px system-ui, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(String(heading).padStart(3, '0') + '°', W / 2, H - 20);
-    ctx.textAlign = 'left';
-
-    // --- bottom left: throttle / fuel / hull ---
-    this.panel(ctx, 14, H - 52, 230, 36, 0.58);
-    const bar = (x, label, frac, color) => {
-      ctx.fillStyle = '#9fb4d8';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.fillText(label, x, H - 36);
-      ctx.fillStyle = 'rgba(255,255,255,0.15)';
-      ctx.fillRect(x, H - 32, 60, 8);
-      ctx.fillStyle = color;
-      ctx.fillRect(x, H - 32, 60 * Math.max(0, Math.min(1, frac)), 8);
-    };
-    bar(26, 'THR', s.throttle, '#ffd76a');
-    bar(98, 'FUEL', s.fuel / s.fuelMax, s.fuel / s.fuelMax < 0.2 ? '#ff5a4e' : '#7dff9a');
-    bar(170, 'HULL', s.hull / s.hullMax, s.hull / s.hullMax < 0.35 ? '#ff5a4e' : '#7fd0ff');
-
-    this.drawReticleWarnings(ctx, s, t, W, H);
-  }
-
-  drawReticleWarnings(ctx, s, t, W, H) {
-    // --- center reticle ---
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 1.5;
-    const rx = W / 2;
-    const ry = H * 0.42;
-    ctx.beginPath();
-    ctx.arc(rx, ry, 14, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(rx - 22, ry);
-    ctx.lineTo(rx - 16, ry);
-    ctx.moveTo(rx + 16, ry);
-    ctx.lineTo(rx + 22, ry);
-    ctx.moveTo(rx, ry - 22);
-    ctx.lineTo(rx, ry - 16);
-    ctx.moveTo(rx, ry + 16);
-    ctx.lineTo(rx, ry + 22);
-    ctx.stroke();
-
-    // --- warnings ---
-    const warn = [];
-    if (s.y < 45 && s.status === 'flying') warn.push(['TERRAIN', '#ff5a4e']);
-    if (s.fuel / s.fuelMax < 0.2) warn.push(['LOW FUEL', '#ffb35e']);
-    if (s.speed < 70 && s.throttle < 0.4 && s.status === 'flying') warn.push(['STALL', '#ff5a4e']);
-    if (warn.length) {
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 24px system-ui, sans-serif';
-      warn.forEach(([txt, col], i) => {
-        const blink = Math.sin(t * 8) > -0.2;
-        if (!blink) return;
-        ctx.fillStyle = col;
-        ctx.fillText(txt, W / 2, H * 0.30 + i * 32);
-      });
-      ctx.textAlign = 'left';
-    }
-  }
+function panel(ctx, x, y, w, h, r = 10) {
+  ctx.fillStyle = PANEL;
+  ctx.strokeStyle = PANEL_EDGE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  ctx.fill();
+  ctx.stroke();
 }
+
+function fmtTime(t) {
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function headingOf(state) {
+  const deg = (Math.atan2(state.vx, Math.max(1, state.speed)) * 180) / Math.PI;
+  return ((360 + deg) % 360 + 360) % 360;
+}
+
+function compassLabel(deg) {
+  const d = ((deg % 360) + 360) % 360;
+  if (d === 0) return 'N';
+  if (d === 90) return 'E';
+  if (d === 180) return 'S';
+  if (d === 270) return 'W';
+  return String(d).padStart(3, '0');
+}
+
+export function drawHUD(ctx, state, view) {
+  const { w, h, time, cockpit, autopilot } = view;
+  const m = state.mission;
+  const kt = Math.round(state.speed * 1.94384);
+  const ft = Math.round(state.y * 3.28084);
+  const hdg = headingOf(state);
+
+  drawObjectives(ctx, state, w, h, time);
+  drawCompass(ctx, w, h, hdg);
+  drawWarnings(ctx, state, w, h, time, autopilot);
+  if (cockpit) return; // the panel below carries the numbers
+  drawTape(ctx, 18, h, ft, 'FT', 100, 'ALT');
+  drawTape(ctx, w - 18, h, kt, 'KT', 20, 'SPD');
+  drawBars(ctx, state, w, h);
+  drawClock(ctx, state, w, h);
+}
+
+// Top-left: what the mission wants, and how far along we are.
+function drawObjectives(ctx, state, w, h, time) {
+  const m = state.mission;
+  const lines = [`${m.name.toUpperCase()}`];
+  lines.push(`GATES  ${state.ringsHit}/${state.course.rings.length}`);
+  if (m.drops) lines.push(`DROPS  ${state.dropsDone}/${m.drops}`);
+  if (m.beacons) lines.push(`BEACONS  ${state.beaconsLit}/${m.beacons}`);
+  if (m.landing) lines.push(state.landing ? 'FINAL: LAND ON THE STRIP' : `STRIP IN ${Math.max(0, Math.round(m.length - state.dist))}m`);
+  const bw = 250;
+  const bh = 22 + lines.length * 24;
+  panel(ctx, 16, 14, bw, bh);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, i) => {
+    ctx.font = i === 0 ? 'bold 17px system-ui, sans-serif' : '15px system-ui, sans-serif';
+    ctx.fillStyle = i === 0 ? AMBER : INK;
+    ctx.fillText(line, 30, 14 + 22 + i * 24);
+  });
+}
+
+// Top-centre: a 380 px compass strip with a centre caret, and the
+// heading readout in bold underneath it.
+function drawCompass(ctx, w, h, hdg) {
+  const cw = 380;
+  const cx = w / 2;
+  const cy = 30;
+  panel(ctx, cx - cw / 2, 14, cw, 56, 10);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx - cw / 2, 14, cw, 56);
+  ctx.clip();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let d = Math.floor((hdg - 62) / 15) * 15; d <= hdg + 62; d += 15) {
+    const deg = ((d % 360) + 360) % 360;
+    const x = cx + (d - hdg) * (cw / 124);
+    const major = deg % 45 === 0;
+    ctx.strokeStyle = major ? INK : DIM;
+    ctx.lineWidth = major ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(x, cy + 12);
+    ctx.lineTo(x, cy + (major ? 26 : 20));
+    ctx.stroke();
+    ctx.font = major ? 'bold 14px system-ui, sans-serif' : '11px system-ui, sans-serif';
+    ctx.fillStyle = major ? INK : DIM;
+    ctx.fillText(compassLabel(deg), x, cy + 2);
+  }
+  ctx.restore();
+  // Centre caret.
+  ctx.fillStyle = AMBER;
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, cy + 28);
+  ctx.lineTo(cx + 7, cy + 28);
+  ctx.lineTo(cx, cy + 38);
+  ctx.closePath();
+  ctx.fill();
+  // Heading readout.
+  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = INK;
+  ctx.fillText(`HDG ${String(Math.round(hdg)).padStart(3, '0')}°`, cx, cy + 48);
+}
+
+// A vertical tape: the current value big and boxed in the middle, tick
+// values stepping away above and below it.
+function drawTape(ctx, edgeX, h, value, unit, step, label) {
+  const cx = edgeX < 200 ? edgeX + 46 : edgeX - 46;
+  const cy = h / 2;
+  const tw = 92;
+  const th = 250;
+  panel(ctx, cx - tw / 2, cy - th / 2, tw, th);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 13px system-ui, sans-serif';
+  ctx.fillStyle = DIM;
+  ctx.fillText(label, cx, cy - th / 2 + 16);
+  // Ticks: two steps each way and out — the step right next to the
+  // current-value box would hide behind it, so it is skipped.
+  for (let i = -4; i <= 4; i++) {
+    if (Math.abs(i) < 2) continue;
+    const v = value + i * step;
+    if (v < 0) continue;
+    const y = cy - i * 22;
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.fillStyle = DIM;
+    ctx.fillText(String(v), cx, y);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - tw / 2 + 8, y);
+    ctx.lineTo(cx - tw / 2 + 18, y);
+    ctx.moveTo(cx + tw / 2 - 18, y);
+    ctx.lineTo(cx + tw / 2 - 8, y);
+    ctx.stroke();
+  }
+  // Current value, big and boxed.
+  ctx.fillStyle = 'rgba(255,181,46,0.18)';
+  ctx.fillRect(cx - tw / 2 + 4, cy - 24, tw - 8, 48);
+  ctx.strokeStyle = AMBER;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(cx - tw / 2 + 4, cy - 24, tw - 8, 48);
+  ctx.font = 'bold 34px system-ui, sans-serif';
+  ctx.fillStyle = INK;
+  ctx.fillText(String(value), cx, cy - 2);
+  ctx.font = 'bold 13px system-ui, sans-serif';
+  ctx.fillStyle = DIM;
+  ctx.fillText(unit, cx, cy + 18);
+}
+
+// Bottom corners: fuel on the left, hull on the right. Bars go amber,
+// then red, as they empty.
+function drawBars(ctx, state, w, h) {
+  const bw = 220;
+  const bh = 46;
+  const y = h - bh - 16;
+  bar(ctx, 16, y, bw, bh, 'FUEL', state.fuel / state.fuelMax, state.fuel / state.fuelMax);
+  bar(ctx, w - bw - 16, y, bw, bh, 'HULL', state.hull / state.hullMax, state.hull / state.hullMax);
+}
+
+function bar(ctx, x, y, w, h, label, frac, raw) {
+  panel(ctx, x, y, w, h);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 13px system-ui, sans-serif';
+  ctx.fillStyle = DIM;
+  ctx.fillText(label, x + 12, y + 13);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = INK;
+  ctx.fillText(`${Math.round(raw * 100)}%`, x + w - 12, y + 13);
+  const color = frac > 0.5 ? GREEN : frac > 0.22 ? AMBER : RED;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(x + 12, y + h - 16, w - 24, 8);
+  ctx.fillStyle = color;
+  ctx.fillRect(x + 12, y + h - 16, (w - 24) * Math.max(0, Math.min(1, frac)), 8);
+}
+
+// Top-right: the clock and the throttle.
+function drawClock(ctx, state, w, h) {
+  panel(ctx, w - 186, 14, 170, 56);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 26px system-ui, sans-serif';
+  ctx.fillStyle = INK;
+  ctx.fillText(fmtTime(state.time), w - 30, 32);
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillStyle = DIM;
+  ctx.fillText(`THR ${Math.round(state.throttle * 100)}%`, w - 30, 56);
+  // Throttle tick under the clock.
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(w - 170, 66, 140, 5);
+  ctx.fillStyle = AMBER;
+  ctx.fillRect(w - 170, 66, 140 * state.throttle, 5);
+}
+
+// Centre-screen warnings, one line at a time, blinking when urgent.
+function drawWarnings(ctx, state, w, h, time, autopilot) {
+  const warns = [];
+  if (state.fuel / state.fuelMax < 0.15) warns.push({ text: 'LOW FUEL', color: RED });
+  if (state.hull / state.hullMax < 0.3) warns.push({ text: 'HULL CRITICAL', color: RED });
+  if (state.y < 60 && state.vy < -5 && !state.landing) warns.push({ text: 'PULL UP', color: AMBER });
+  if (state.landing && state.y < 120) warns.push({ text: 'GEAR DOWN — FINAL', color: GREEN });
+  if (autopilot) warns.push({ text: 'AUTOPILOT', color: '#7fd4ff' });
+  if (!warns.length) return;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  warns.forEach((warn, i) => {
+    // Below the compass strip and its heading readout (which ends near
+    // y=90), so the warnings never sit on top of the numbers.
+    const y = 122 + i * 30;
+    const blink = warn.color === RED ? 0.6 + 0.4 * Math.sin(time * 7) : 1;
+    ctx.globalAlpha = blink;
+    ctx.font = 'bold 22px system-ui, sans-serif';
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(10,10,16,0.85)';
+    ctx.strokeText(warn.text, w / 2, y);
+    ctx.fillStyle = warn.color;
+    ctx.fillText(warn.text, w / 2, y);
+    ctx.globalAlpha = 1;
+  });
+}
+
+export { headingOf };

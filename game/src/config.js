@@ -1,141 +1,176 @@
-// EMBERWING v3 — mission and world tuning.
-// Same proven flight numbers as v2 (autopilot-verified 6/6). v3 changes:
-// the final ring of a landing mission now sits on the approach, 900 m
-// before the strip, low (y ≈ 120) — thread the last gate, then land.
-// That is what the hero screenshot frames: ring + runway in one view.
+// EMBERWING v3 — mission data and world tuning.
+// One place holds every number the flight model, the autopilot and the
+// renderer agree on, so a mission the sim can finish is a mission the
+// player can finish too. Speeds are metres per second, altitudes metres,
+// distances metres; the HUD converts to knots and feet for display.
+
+// --- the world the jet flies in -------------------------------------------
 export const WORLD = {
-  halfWidth: 420, // lateral meters, -420..420
-  maxAlt: 520, // meters
-  groundY: 0,
-  ringRadius: 75,
-  cloudMinR: 80,
-  cloudMaxR: 150,
-  baseSpeed: 150, // m/s at throttle 0
-  speedPerThrottle: 170, // +m/s at throttle 1
-  maxSteer: 120, // lateral m/s at full stick
-  maxClimb: 75, // vertical m/s at full stick
-  fuelDrain: 0.0038, // per second at throttle 0.7 (scales with throttle^2)
-  fuelPerRing: 0.02,
-  cloudDamage: 14,
-  missionTimeLimit: 300, // seconds
+  halfWidth: 700, // the valley walls: |x| never passes this
+  maxAlt: 700, // the ceiling: y clamps to [0, maxAlt]
+  ringRadius: 55, // a gate's hit radius (canyon gates run 8% tighter)
+  cloudMinR: 60, // smallest storm cell
+  cloudMaxR: 130, // largest storm cell
+  baseSpeed: 130, // cruise at idle throttle
+  speedPerThrottle: 170, // +170 m/s from idle to full throttle
+  maxSteer: 95, // fastest sideways speed, m/s
+  maxClimb: 75, // fastest climb / sink, m/s
+  fuelDrain: 0.0035, // fuel per second at full throttle, scaled by throttle^2
+  fuelPerRing: 0.02, // fuel refunded for threading a gate
+  cloudDamage: 7, // hull lost for flying through a storm cell
+  missionTimeLimit: 320, // seconds; the window closes after this
 };
 
-export const UPGRADES = {
-  engine: { name: 'Afterburner Mk II', desc: '+8% top speed per level', max: 3, costs: [2, 3, 4], apply: (u) => ({ speedMult: 1 + 0.08 * u }) },
-  tanks: { name: 'Drop Tanks', desc: '+20% fuel per level', max: 3, costs: [2, 3, 4], apply: (u) => ({ fuelMult: 1 + 0.2 * u }) },
-  armor: { name: 'Titanium Skin', desc: '+25 hull per level', max: 3, costs: [2, 3, 4], apply: (u) => ({ hullBonus: 25 * u }) },
-  handling: { name: 'Fly-by-Wire', desc: '+12% turn & climb per level', max: 3, costs: [2, 3, 4], apply: (u) => ({ handlingMult: 1 + 0.12 * u }) },
-};
-
-export const MEDAL_MERITS = { gold: 3, silver: 2, bronze: 1 };
-
-// Sky palettes per mission: [top, mid, horizon, sun color, fog color]
-export const PALETTES = {
-  dawn: {
-    skyTop: '#2b3a67', skyMid: '#e8825a', skyHorizon: '#ffd9a0',
-    sun: '#ffdf9e', sunX: 0.72, sunY: 0.30,
-    far: '#6d5a8e', mid: '#4a3f66', near: '#2e2a44',
-    ground: '#3d3350', groundLine: '#584a72', river: '#e8a56b',
-    cloud: 'rgba(255, 214, 170, 0.85)', cloudShadow: 'rgba(90, 60, 110, 0.35)',
-    stars: 0, rain: false, fog: 0.10,
-  },
-  noon: {
-    skyTop: '#1e6fd9', skyMid: '#6db3f2', skyHorizon: '#cfe9ff',
-    sun: '#fff7c0', sunX: 0.25, sunY: 0.18,
-    far: '#7fa8c9', mid: '#5d8a6b', near: '#3f6b4a',
-    ground: '#4a7a45', groundLine: '#6b9a5e', river: '#7fc4e8',
-    cloud: 'rgba(255, 255, 255, 0.92)', cloudShadow: 'rgba(70, 110, 90, 0.25)',
-    stars: 0, rain: false, fog: 0.08,
-  },
-  dusk: {
-    skyTop: '#3a1f4d', skyMid: '#c94f5e', skyHorizon: '#ffb37a',
-    sun: '#ff9e5e', sunX: 0.5, sunY: 0.42,
-    far: '#5e3a5e', mid: '#46304e', near: '#2c2138',
-    ground: '#3a2f42', groundLine: '#54455a', river: '#e88a5a',
-    cloud: 'rgba(255, 170, 130, 0.8)', cloudShadow: 'rgba(60, 30, 60, 0.4)',
-    stars: 0.25, rain: false, fog: 0.12,
-  },
-  storm: {
-    skyTop: '#1c2233', skyMid: '#4a4a63', skyHorizon: '#8a7f8a',
-    sun: '#d8d2c0', sunX: 0.6, sunY: 0.22,
-    far: '#3d3d52', mid: '#2f2f42', near: '#232333',
-    ground: '#2c2c38', groundLine: '#44445a', river: '#6a7a8a',
-    cloud: 'rgba(40, 38, 55, 0.95)', cloudShadow: 'rgba(10, 10, 20, 0.5)',
-    stars: 0, rain: true, fog: 0.22, lightning: true,
-  },
-  night: {
-    skyTop: '#050816', skyMid: '#0d1533', skyHorizon: '#2a2a55',
-    sun: '#e8ecff', sunX: 0.8, sunY: 0.16,
-    far: '#1c2340', mid: '#141a30', near: '#0d1122',
-    ground: '#12162a', groundLine: '#232a4a', river: '#3a4a7a',
-    cloud: 'rgba(90, 100, 160, 0.7)', cloudShadow: 'rgba(5, 8, 20, 0.5)',
-    stars: 1, rain: false, fog: 0.18, moon: true,
-  },
-};
-
+// --- the campaign ----------------------------------------------------------
+// length is the strip: landing missions end on the runway at `length`,
+// and the final gate sits 900 m before it, low on the centreline, so the
+// glide threads it on the way to touchdown. ringGap is the spacing
+// between gates; parGold/parSilver are the medal times in seconds.
 export const MISSIONS = [
   {
-    id: 'dawn-patrol', name: 'Dawn Patrol', num: 1,
-    briefing: 'First light over the Ember Ridge. Thread 12 rings to shake the dawn dew off your wings. Calm air — learn the jet, earn your wings.',
-    palette: 'dawn', seed: 11, length: 13000, rings: 12,
-    clouds: 0, turbulence: 0, rain: false,
-    drops: 0, landing: false, night: false,
-    parGold: 62, parSilver: 82, ringGap: [750, 1150],
+    id: 'dawn',
+    name: 'Dawn Patrol',
+    seed: 11,
+    rings: 12,
+    ringGap: [520, 760],
+    length: 9500,
+    clouds: 6,
+    turbulence: 0,
+    landing: true,
+    parGold: 45,
+    parSilver: 55,
+    sky: 'dawn',
+    brief: 'First light over the valley. Thread all twelve gates and bring her home on the strip.',
   },
   {
-    id: 'canyon-rush', name: 'Canyon Rush', num: 2,
-    briefing: 'The canyon narrows and the wind picks up. 16 gates, low and fast, storm cells drifting across the gap. Keep it tight, keep it alive.',
-    palette: 'noon', seed: 23, length: 17000, rings: 16,
-    clouds: 6, turbulence: 0.25, rain: false,
-    drops: 0, landing: false, night: false, canyon: true,
-    parGold: 78, parSilver: 102, ringGap: [700, 1050],
+    id: 'canyon',
+    name: 'Canyon Rush',
+    seed: 23,
+    rings: 16,
+    ringGap: [480, 720],
+    length: 11500,
+    clouds: 8,
+    canyon: true,
+    turbulence: 0.08,
+    landing: true,
+    parGold: 55,
+    parSilver: 65,
+    sky: 'canyon',
+    brief: 'Down between the walls. The gates are tighter here — stay off the rock and off the river.',
   },
   {
-    id: 'relief-drop', name: 'Relief Drop', num: 3,
-    briefing: 'Three villages cut off by the flood. Fly 8 rings to the drop corridor, release a crate over each village — low and slow — then thread the last gate and put her down on the strip.',
-    palette: 'dusk', seed: 37, length: 15000, rings: 8,
-    clouds: 3, turbulence: 0.15, rain: false,
-    drops: 3, landing: true, night: false,
-    parGold: 92, parSilver: 120, ringGap: [750, 1100],
+    id: 'relief',
+    name: 'Relief Drop',
+    seed: 37,
+    rings: 8,
+    ringGap: [900, 1300],
+    length: 15000,
+    clouds: 10,
+    drops: 3,
+    turbulence: 0.1,
+    landing: true,
+    parGold: 60,
+    parSilver: 75,
+    sky: 'relief',
+    brief: 'Three villages are waiting on the ground. Drop low over each one, then land with the last of the light.',
   },
   {
-    id: 'stormfront', name: 'Stormfront', num: 4,
-    briefing: 'The front is here. 18 rings inside a living storm — rain, gusts, lightning, and cloud walls you cannot fly through. This is the one they write songs about.',
-    palette: 'storm', seed: 51, length: 19000, rings: 18,
-    clouds: 10, turbulence: 0.6, rain: true,
-    drops: 0, landing: false, night: false,
-    parGold: 96, parSilver: 126, ringGap: [700, 1050],
+    id: 'storm',
+    name: 'Stormfront',
+    seed: 41,
+    rings: 18,
+    ringGap: [550, 800],
+    length: 14000,
+    clouds: 16,
+    turbulence: 0.22,
+    landing: true,
+    parGold: 65,
+    parSilver: 80,
+    sky: 'storm',
+    brief: 'Fly the front itself. Cells everywhere, the air shoving you sideways — slide around them, never through.',
   },
   {
-    id: 'night-intercept', name: 'Night Intercept', num: 5,
-    briefing: 'Last one. Four beacons burning in the dark, ten rings between them, a last gate on the approach, and a strip lit by a single row of lamps. Land it, and you are an Ace.',
-    palette: 'night', seed: 67, length: 17000, rings: 10,
-    clouds: 4, turbulence: 0.2, rain: false,
-    drops: 0, landing: true, night: true, beacons: 4,
-    parGold: 102, parSilver: 132, ringGap: [800, 1150],
+    id: 'night',
+    name: 'Night Intercept',
+    seed: 53,
+    rings: 10,
+    ringGap: [1100, 1500],
+    length: 17200,
+    clouds: 8,
+    beacons: 4,
+    turbulence: 0.06,
+    landing: true,
+    parGold: 70,
+    parSilver: 85,
+    sky: 'night',
+    brief: 'Moonlight, beacons and a black valley. Light all four beacons, thread the gates, land by the lamps.',
   },
 ];
 
+// Endless practice: sixty gates out to the horizon, no strip, no clock
+// pressure beyond the mission limit. Finishing is the medal.
 export const FREE_FLIGHT = {
-  id: 'free-flight', name: 'Free Flight', num: 0,
-  briefing: 'No briefing. No clock. Rings as far as the fuel lasts — every ring tops the tanks up a little. How far can you go?',
-  palette: 'noon', seed: 99, length: 60000, rings: 60,
-  clouds: 8, turbulence: 0.2, rain: false,
-  drops: 0, landing: false, night: false,
-  parGold: 0, parSilver: 0, ringGap: [750, 1100],
+  id: 'free',
+  name: 'Free Flight',
+  seed: 67,
+  rings: 60,
+  ringGap: [700, 1100],
+  length: 60000,
+  clouds: 0,
+  turbulence: 0,
+  landing: false,
+  parGold: 0,
+  parSilver: 0,
+  sky: 'dawn',
+  brief: 'No strip, no clock. Sixty gates out to the horizon — fly them all.',
 };
 
-// Pilot ranks by total merits earned across the campaign.
+// Merits a medal is worth in the hangar.
+export const MEDAL_MERITS = { gold: 3, silver: 2, bronze: 1 };
+
+// Hangar upgrades: each level costs merits, each level makes the jet
+// tangibly better. Costs are per level (level 1 costs costs[0]).
+export const UPGRADES = {
+  engine: { name: 'Engine', max: 3, costs: [2, 3, 4], blurb: '+8% speed per level' },
+  tanks: { name: 'Drop Tanks', max: 2, costs: [2, 3], blurb: '+20% fuel per level' },
+  armor: { name: 'Armor', max: 2, costs: [2, 3], blurb: '+25 hull per level' },
+  handling: { name: 'Handling', max: 3, costs: [2, 3, 4], blurb: '+12% agility per level' },
+};
+
+// Pilot ranks, by lifetime merits earned.
 export const RANKS = [
-  { merits: 0, name: 'Cadet' },
-  { merits: 3, name: 'Pilot' },
-  { merits: 6, name: 'Flight Lead' },
-  { merits: 10, name: 'Ace' },
-  { merits: 14, name: 'Storm Legend' },
+  { merits: 0, name: 'Rookie' },
+  { merits: 4, name: 'Wingman' },
+  { merits: 9, name: 'Flight Lead' },
+  { merits: 15, name: 'Ace' },
+  { merits: 24, name: 'EMBERWING' },
 ];
 
-export function rankFor(merits) {
-  let r = RANKS[0];
-  for (const cand of RANKS) if (merits >= cand.merits) r = cand;
-  return r;
-}
+// --- skies: one palette per mission, the renderer paints from these ------
+export const SKIES = {
+  dawn: {
+    top: '#2c4a7c', horizon: '#f2a35e', ground: '#5d4a33', groundFar: '#7a5c40',
+    ridgeFar: '#6b5a78', ridgeNear: '#3d3348', sun: '#ffd9a0', sunX: 0.72, sunY: 0.30,
+    night: false, stars: false, moon: false, rain: false,
+  },
+  canyon: {
+    top: '#7fb2d9', horizon: '#cfe3ee', ground: '#8a6a4a', groundFar: '#a08055',
+    ridgeFar: '#9a7a5c', ridgeNear: '#6b4a30', sun: '#fff3c4', sunX: 0.25, sunY: 0.22,
+    night: false, stars: false, moon: false, rain: false,
+  },
+  relief: {
+    top: '#3a6ea8', horizon: '#e8b06a', ground: '#6d5a3a', groundFar: '#8a744c',
+    ridgeFar: '#5d6a86', ridgeNear: '#3a4258', sun: '#ffe0a8', sunX: 0.30, sunY: 0.34,
+    night: false, stars: false, moon: false, rain: false,
+  },
+  storm: {
+    top: '#1c2436', horizon: '#4a5568', ground: '#3a3a30', groundFar: '#4c4a3c',
+    ridgeFar: '#2e3444', ridgeNear: '#1e2230', sun: '#c8d2e0', sunX: 0.68, sunY: 0.18,
+    night: false, stars: false, moon: false, rain: true,
+  },
+  night: {
+    top: '#05070f', horizon: '#1a2340', ground: '#14161e', groundFar: '#1e2230',
+    ridgeFar: '#12162a', ridgeNear: '#0a0d1a', sun: '#f4f1de', sunX: 0.78, sunY: 0.20,
+    night: true, stars: true, moon: true, rain: false,
+  },
+};
